@@ -1,0 +1,91 @@
+import asyncio
+import time
+from urllib.parse import urljoin
+
+import httpx
+from fake_useragent import UserAgent
+from bs4 import BeautifulSoup
+
+
+# Заголовки
+headers = {
+    "user-agent": UserAgent().random
+}
+
+# В один момент максимум парсится одновременно 5 страниц
+semaphore = asyncio.Semaphore(5)
+
+# Словарь, в котором будет храниться информация о всех цитатах
+quotes_list = []
+
+
+# Функция для парсинга 1-й страницы
+async def fetch_page(client, url):
+    async with semaphore:
+        await asyncio.sleep(0.2)
+
+        response = await client.get(url)
+
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, "lxml")
+            quotes = soup.find_all("div", class_ = "quote")
+
+            for quote in quotes:
+                info = {
+                    "Цитата": quote.find("span", class_ = "text").get_text(),
+                    "Автор": quote.find("small", class_ = "author").get_text(),
+                    "Ссылка на автора": "https://quotes.toscrape.com" + quote.find("a")["href"],
+                    "Теги": [tag.get_text() for tag in quote.find_all("a", class_ = "tag")],
+                }
+
+                quotes_list.append(info)
+
+        print("Парсинг окончен!")
+
+
+# Быстро получаем все страницы
+async def get_all_urls(client, start_url):
+    urls = [start_url]
+    current_url = start_url
+
+    while current_url:
+        response = await client.get(current_url)
+        soup = BeautifulSoup(response.text, "lxml")
+        next_button = soup.find("li", class_ = "next")
+
+        if next_button:
+                next_page = next_button.find("a")["href"]
+                current_url = urljoin(start_url, next_page)
+                urls.append(current_url)
+        else:
+            current_url = None
+
+    return urls
+
+
+# Главная функция, в которой происходит парсинг всех страниц
+async def main():
+    # Время начала парсинга
+    start_time = time.time()
+
+    # Начальная ссылка, откуда начнётся наш парсинг
+    start_url = "https://quotes.toscrape.com/"
+
+    async with httpx.AsyncClient(headers=headers) as client:
+        # 1. Получаем все ссылки на страницы
+        all_urls = await get_all_urls(client, start_url)
+        print(f"Собрано ссылок на страниц: {len(all_urls)}")
+
+        # 2. Создаём пачку задач для всех страниц
+        tasks = [fetch_page(client, url) for url in all_urls]
+
+        # 3. Запуск параллельного парсинга
+        await asyncio.gather(*tasks)
+
+    end_time = time.time()
+
+    print(f"Парсинг окончен! Всего запарсено {len(quotes_list)} цитат!")
+    print(f"Время парсинга: {end_time - start_time} секунд!")
+
+
+asyncio.run(main())

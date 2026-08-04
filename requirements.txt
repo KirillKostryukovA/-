@@ -1,0 +1,5 @@
+httpx==0.28.1
+bs4==0.0.2
+lxml==6.1.1
+fake-useragent==2.2.0
+playwright==13.0.1
